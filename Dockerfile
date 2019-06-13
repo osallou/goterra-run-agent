@@ -12,12 +12,24 @@ RUN go get -u github.com/golang/dep/cmd/dep
 RUN dep ensure
 
 # Install the package
-RUN go build goterra-run-agent.go
+RUN go build -ldflags "-X  main.Version=`git rev-parse --short HEAD`" goterra-run-agent.go
 RUN cp goterra-run-agent.yml.example goterra.yml
+
+RUN wget https://releases.hashicorp.com/terraform/0.12.2/terraform_0.12.2_linux_amd64.zip
+RUN apt-get update && apt-get install -y unzip
+RUN unzip terraform_0.12.2_linux_amd64.zip
+RUN VERSION=`curl --silent "https://api.github.com/repos/osallou/terraform-provider-goterra/releases/latest" | grep '"tag_name":'| sed -E 's/.*"([^"]+)".*/\1/'` && curl -L -o terraform-provider-goterra https://github.com/osallou/terraform-provider-goterra/releases/download/$VERSION/terraform-provider-goterra.linux.amd64
+
+
+# Get terraform
+# Get terraform-provider-goterra
 
 FROM alpine:latest  
 RUN apk --no-cache add ca-certificates
 WORKDIR /root/
+RUN mkdir -p /root/.terraform.d/plugins
 COPY --from=0 /go/src/github.com/osallou/goterra-run-agent/goterra-run-agent .
+COPY --from=0 /go/src/github.com/osallou/goterra-run-agent/terraform /usr/bin/
+COPY --from=0 /go/src/github.com/osallou/goterra-run-agent/terraform-provider-goterra /root/.terraform.d/plugins/ 
 RUN mkdir /lib64 && ln -s /lib/libc.musl-x86_64.so.1 /lib64/ld-linux-x86-64.so.2
 CMD ["./goterra-run-agent"]
