@@ -324,7 +324,7 @@ func main() {
 
 	config := terraConfig.LoadConfig()
 
-	consulErr := terraConfig.ConsulDeclare("got-status", "/status")
+	consulErr := terraConfig.ConsulDeclare("got-run-agent", "/run-agent")
 	if consulErr != nil {
 		fmt.Printf("Failed to register: %s", consulErr.Error())
 		panic(consulErr)
@@ -354,9 +354,9 @@ func main() {
 	}
 
 	r := mux.NewRouter()
-	r.HandleFunc("/status", HomeHandler).Methods("GET")
+	r.HandleFunc("/run-agent", HomeHandler).Methods("GET")
 
-	r.HandleFunc("/deploy/ns/{id}/run/{run}", GetRunStatusHandler).Methods("GET") // deploy app
+	r.HandleFunc("/run-agent/ns/{id}/run/{run}", GetRunStatusHandler).Methods("GET") // deploy app
 
 	handler := cors.Default().Handler(r)
 
