@@ -171,7 +171,7 @@ func GetRunAction() error {
 		"gotaction",
 		true,  // durable
 		false, // auto-deleted
-		false, // internal
+		false, // exclusive
 		false, // no-wait
 		nil,   // arguments
 	)
@@ -200,9 +200,10 @@ func GetRunAction() error {
 		return consumeErr
 	}
 
-	// forever := make(chan bool)
+	forever := make(chan bool)
 
 	go func() {
+		fmt.Printf("[DEBUG] listen for messages on %s", queue.Name)
 		for d := range msgs {
 			fmt.Printf("[DEBUG] got a message %s", d.Body)
 			action := RunAction{}
@@ -249,6 +250,8 @@ func GetRunAction() error {
 			d.Ack(true)
 		}
 	}()
+
+	<-forever
 
 	// log.Printf(" [*] Waiting for logs. To exit press CTRL+C")
 	// <-forever
@@ -347,11 +350,12 @@ func main() {
 	runCollection = mongoClient.Database(config.Mongo.DB).Collection("run")
 	runOutputsCollection = mongoClient.Database(config.Mongo.DB).Collection("runoutputs")
 
-	amqpErr := GetRunAction()
-	if amqpErr != nil {
-		log.Printf("[ERROR] Failed to listen amqp messages: %s", amqpErr)
-		os.Exit(1)
-	}
+	go GetRunAction()
+	/*
+		if amqpErr != nil {
+			log.Printf("[ERROR] Failed to listen amqp messages: %s", amqpErr)
+			os.Exit(1)
+		}*/
 
 	r := mux.NewRouter()
 	r.HandleFunc("/run-agent", HomeHandler).Methods("GET")
