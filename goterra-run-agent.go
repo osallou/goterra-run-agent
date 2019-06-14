@@ -337,7 +337,7 @@ func main() {
 
 	mongoClient, err := mongo.NewClient(mongoOptions.Client().ApplyURI(config.Mongo.URL))
 	if err != nil {
-		log.Printf("[ERROR] Failed to connect to mongo server %s\n", config.Mongo.URL)
+		log.Error().Msgf("Failed to connect to mongo server %s", config.Mongo.URL)
 		os.Exit(1)
 	}
 	ctx, cancelMongo := context.WithTimeout(context.Background(), 10*time.Second)
@@ -345,7 +345,7 @@ func main() {
 
 	err = mongoClient.Connect(ctx)
 	if err != nil {
-		log.Printf("[ERROR] Failed to connect to mongo server %s\n", config.Mongo.URL)
+		log.Error().Msgf("Failed to connect to mongo server %s", config.Mongo.URL)
 		os.Exit(1)
 	}
 	nsCollection = mongoClient.Database(config.Mongo.DB).Collection("ns")
@@ -376,6 +376,6 @@ func main() {
 		ReadTimeout:  15 * time.Second,
 	}
 
-	log.Fatal(srv.ListenAndServe())
+	srv.ListenAndServe()
 
 }
