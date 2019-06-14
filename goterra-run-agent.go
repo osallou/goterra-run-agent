@@ -88,7 +88,7 @@ func GotAction(action RunAction) (float64, []byte, error) {
 		fmt.Printf("[Terraform:init]%s", cmdOut)
 
 		cmdName = "terraform"
-		cmdArgs = []string{"apply", "-auto-approve"}
+		cmdArgs = []string{"apply", "-auto-approve", "-input=false"}
 		cmd = exec.Command(cmdName, cmdArgs...)
 		cmd.Dir = runPath
 		if cmdOut, tfErr = cmd.Output(); tfErr != nil {
@@ -252,9 +252,6 @@ func GetRunAction() error {
 	}()
 
 	<-forever
-
-	// log.Printf(" [*] Waiting for logs. To exit press CTRL+C")
-	// <-forever
 
 	return nil
 }

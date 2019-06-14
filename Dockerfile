@@ -18,7 +18,7 @@ RUN cp goterra-run-agent.yml.example goterra.yml
 RUN wget https://releases.hashicorp.com/terraform/0.12.2/terraform_0.12.2_linux_amd64.zip
 RUN apt-get update && apt-get install -y unzip
 RUN unzip terraform_0.12.2_linux_amd64.zip
-RUN VERSION=`curl --silent "https://api.github.com/repos/osallou/terraform-provider-goterra/releases/latest" | grep '"tag_name":'| sed -E 's/.*"([^"]+)".*/\1/'` && curl -L -o terraform-provider-goterra https://github.com/osallou/terraform-provider-goterra/releases/download/$VERSION/terraform-provider-goterra.linux.amd64
+RUN VERSION=`curl --silent "https://api.github.com/repos/osallou/terraform-provider-goterra/releases/latest" | grep '"tag_name":'| sed -E 's/.*"([^"]+)".*/\1/'` && curl -L -o terraform-provider-goterra https://github.com/osallou/terraform-provider-goterra/releases/download/$VERSION/terraform-provider-goterra.linux.amd64 && chmod +x terraform-provider-goterra
 
 
 # Get terraform
