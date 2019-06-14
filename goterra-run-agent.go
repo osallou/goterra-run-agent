@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -23,6 +22,9 @@ import (
 
 	terraToken "github.com/osallou/goterra-lib/lib/token"
 	"github.com/streadway/amqp"
+
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
 // Version of server
@@ -81,33 +83,30 @@ func GotAction(action RunAction) (float64, []byte, error) {
 		cmd := exec.Command(cmdName, cmdArgs...)
 		cmd.Dir = runPath
 		if cmdOut, tfErr = cmd.Output(); tfErr != nil {
-			fmt.Printf("Terraform init failed: %s\n", tfErr)
-			fmt.Printf("[ERROR] %s", cmdOut)
+			log.Error().Str("run", action.ID).Str("out", string(cmdOut)).Msgf("Terraform init failed: %s", tfErr)
 			return 0, cmdOut, tfErr
 		}
-		fmt.Printf("[Terraform:init]%s", cmdOut)
+		log.Info().Str("run", action.ID).Str("out", string(cmdOut)).Msg("Terraform:init")
 
 		cmdName = "terraform"
 		cmdArgs = []string{"apply", "-auto-approve", "-input=false"}
 		cmd = exec.Command(cmdName, cmdArgs...)
 		cmd.Dir = runPath
 		if cmdOut, tfErr = cmd.Output(); tfErr != nil {
-			fmt.Printf("Terraform apply failed: %s\n", tfErr)
-			fmt.Printf("[ERROR] %s", cmdOut)
+			log.Error().Str("run", action.ID).Str("out", string(cmdOut)).Msgf("Terraform apply failed: %s", tfErr)
 			return 0, cmdOut, tfErr
 		}
-		fmt.Printf("[Terraform:apply] %s\n", cmdOut)
+		log.Info().Str("run", action.ID).Str("out", string(cmdOut)).Msg("Terraform:apply")
 
 		cmdName = "terraform"
 		cmdArgs = []string{"output", "-json"}
 		cmd = exec.Command(cmdName, cmdArgs...)
 		cmd.Dir = runPath
 		if cmdOut, tfErr = cmd.Output(); tfErr != nil {
-			fmt.Printf("Terraform output failed: %s\n", tfErr)
-			fmt.Printf("[ERROR] %s", cmdOut)
+			log.Error().Str("run", action.ID).Str("out", string(cmdOut)).Msgf("Terraform output failed: %s", tfErr)
 			return 0, cmdOut, tfErr
 		}
-		fmt.Printf("[Terraform:output] %s\n", cmdOut)
+		log.Info().Str("run", action.ID).Str("out", string(cmdOut)).Msg("Terraform:output")
 		outputs = cmdOut
 	} else if action.Action == "destroy" {
 		runPathElts := []string{config.Deploy.Path, action.ID}
@@ -121,15 +120,14 @@ func GotAction(action RunAction) (float64, []byte, error) {
 		cmd := exec.Command(cmdName, cmdArgs...)
 		cmd.Dir = runPath
 		if cmdOut, tfErr = cmd.Output(); tfErr != nil {
-			fmt.Printf("Terraform destroy failed: %s\n", tfErr)
-			fmt.Printf("[ERROR] %s", cmdOut)
+			log.Error().Str("run", action.ID).Str("out", string(cmdOut)).Msgf("Terraform destroy failed: %s", tfErr)
 			return 0, cmdOut, tfErr
 		}
-		fmt.Printf("[Terraform:destroy] %s\n", cmdOut)
+		log.Info().Str("run", action.ID).Str("out", string(cmdOut)).Msg("Terraform:destroy")
 	}
 	tsEnd := time.Now()
 	duration := tsEnd.Sub(tsStart).Seconds()
-	fmt.Printf("[DEBUG] duration: %f", duration)
+	log.Debug().Str("run", action.ID).Float64("duration", duration).Msg("Terraform:done")
 	return duration, outputs, nil
 }
 
@@ -137,19 +135,19 @@ func GotAction(action RunAction) (float64, []byte, error) {
 func GetRunAction() error {
 	config := terraConfig.LoadConfig()
 	if config.Amqp == "" {
-		fmt.Printf("[ERROR] no amqp defined\n")
+		log.Error().Msg("no amqp defined")
 		return fmt.Errorf("No AMQP config found")
 	}
 	conn, err := amqp.Dial(config.Amqp)
 	if err != nil {
-		fmt.Printf("[ERROR] failed to connect to %s\n", config.Amqp)
+		log.Error().Msgf("failed to connect to %s", config.Amqp)
 		return err
 	}
 	defer conn.Close()
 
 	ch, err := conn.Channel()
 	if err != nil {
-		fmt.Printf("[ERROR] failed to connect to amqp\n")
+		log.Error().Msg("failed to connect to amqp")
 		return err
 	}
 
@@ -163,7 +161,7 @@ func GetRunAction() error {
 		nil,      // arguments
 	)
 	if err != nil {
-		fmt.Printf("[ERROR] failed to connect to open exchange\n")
+		log.Error().Msg("failed to connect to open exchange")
 		return err
 	}
 
@@ -176,13 +174,13 @@ func GetRunAction() error {
 		nil,   // arguments
 	)
 	if queueErr != nil {
-		fmt.Printf("[ERROR] failed to create queue\n")
+		log.Error().Msg("failed to create queue")
 		return queueErr
 	}
 
 	bindErr := ch.QueueBind(queue.Name, "", "gotrun", false, nil)
 	if bindErr != nil {
-		fmt.Printf("[ERROR] failed to bind queue to exchange\n")
+		log.Error().Msg("failed to bind queue to exchange")
 		return bindErr
 	}
 
@@ -196,27 +194,27 @@ func GetRunAction() error {
 		nil,        // args
 	)
 	if consumeErr != nil {
-		fmt.Printf("[ERROR] failed to get messages\n")
+		log.Error().Msg("failed to get messages")
 		return consumeErr
 	}
 
 	forever := make(chan bool)
 
 	go func() {
-		fmt.Printf("[DEBUG] listen for messages on %s", queue.Name)
+		log.Debug().Msgf("listen for messages on %s", queue.Name)
 		for d := range msgs {
-			fmt.Printf("[DEBUG] got a message %s", d.Body)
+			log.Debug().Msg("got a message")
 			action := RunAction{}
 			err := json.Unmarshal(d.Body, &action)
 			if err != nil {
-				fmt.Printf("failed to decode message %s", d.Body)
+				log.Error().Msgf("failed to decode message %s", d.Body)
 				d.Ack(true)
 				continue
 			}
 			duration, outputs, msgErr := GotAction(action)
 			status := "success"
 			if msgErr != nil {
-				fmt.Printf("Error with action: %s", msgErr)
+				log.Error().Msgf("Error with action: %s", msgErr)
 				status = "failure"
 			} else {
 				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -322,11 +320,18 @@ var GetRunStatusHandler = func(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+
+	zerolog.SetGlobalLevel(zerolog.InfoLevel)
+	if os.Getenv("GOT_DEBUG") != "" {
+		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	}
+
 	config := terraConfig.LoadConfig()
 
 	consulErr := terraConfig.ConsulDeclare("got-run-agent", "/run-agent")
 	if consulErr != nil {
-		fmt.Printf("Failed to register: %s", consulErr.Error())
+		log.Error().Msgf("Failed to register: %s", consulErr.Error())
 		panic(consulErr)
 	}
 
