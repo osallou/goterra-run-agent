@@ -29,6 +29,7 @@ RUN apk --no-cache add ca-certificates
 WORKDIR /root/
 RUN mkdir -p /root/.terraform.d/plugins
 COPY --from=0 /go/src/github.com/osallou/goterra-run-agent/goterra-run-agent .
+COPY --from=0 /go/src/github.com/osallou/goterra-run-agent/goterra.yml .
 COPY --from=0 /go/src/github.com/osallou/goterra-run-agent/terraform /usr/bin/
 COPY --from=0 /go/src/github.com/osallou/goterra-run-agent/terraform-provider-goterra /root/.terraform.d/plugins/ 
 RUN mkdir /lib64 && ln -s /lib/libc.musl-x86_64.so.1 /lib64/ld-linux-x86-64.so.2
