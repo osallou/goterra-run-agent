@@ -92,11 +92,16 @@ func GotAction(action RunAction) (float64, []byte, error) {
 		cmdName = "terraform"
 		cmdArgs = []string{"apply", "-auto-approve", "-input=false"}
 		// Add sensitive data via env vars when executing command
+
+		cmd = exec.Command(cmdName, cmdArgs...)
 		cmd.Env = os.Environ()
 		for key, val := range action.Secrets {
+			log.Info().Str("secret", key).Msg("Received some secrets...")
+			if val == "" {
+				log.Error().Str("secret", key).Msg("secret is empty")
+			}
 			cmd.Env = append(cmd.Env, fmt.Sprintf("TF_VAR_%s=%s", key, val))
 		}
-		cmd = exec.Command(cmdName, cmdArgs...)
 		cmd.Dir = runPath
 		cmdOut, tfErrExec := cmd.CombinedOutput()
 		if tfErrExec != nil {
