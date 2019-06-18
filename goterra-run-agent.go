@@ -98,9 +98,10 @@ func GotAction(action RunAction) (float64, []byte, error) {
 		}
 		cmd = exec.Command(cmdName, cmdArgs...)
 		cmd.Dir = runPath
-		if cmdOut, tfErr = cmd.Output(); tfErr != nil {
-			log.Error().Str("run", action.ID).Str("out", string(cmdOut)).Msgf("Terraform apply failed: %s", tfErr)
-			return 0, cmdOut, tfErr
+		cmdOut, tfErrExec := cmd.CombinedOutput()
+		if tfErrExec != nil {
+			log.Error().Str("run", action.ID).Str("out", string(cmdOut)).Msgf("Terraform apply failed: %s", tfErrExec)
+			return 0, cmdOut, tfErrExec
 		}
 		log.Info().Str("run", action.ID).Str("out", string(cmdOut)).Msg("Terraform:apply")
 
