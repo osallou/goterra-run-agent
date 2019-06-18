@@ -61,8 +61,9 @@ type Run struct {
 // action: apply or destroy
 // id: identifier of the run
 type RunAction struct {
-	Action string `json:"action"`
-	ID     string `json:"id"`
+	Action  string            `json:"action"`
+	ID      string            `json:"id"`
+	Secrets map[string]string `json:"secrets"`
 }
 
 // GotAction manage received message
@@ -90,6 +91,11 @@ func GotAction(action RunAction) (float64, []byte, error) {
 
 		cmdName = "terraform"
 		cmdArgs = []string{"apply", "-auto-approve", "-input=false"}
+		// Add sensitive data via env vars when executing command
+		cmd.Env = os.Environ()
+		for key, val := range action.Secrets {
+			cmd.Env = append(cmd.Env, fmt.Sprintf("TF_VAR_%s=%s", key, val))
+		}
 		cmd = exec.Command(cmdName, cmdArgs...)
 		cmd.Dir = runPath
 		if cmdOut, tfErr = cmd.Output(); tfErr != nil {
