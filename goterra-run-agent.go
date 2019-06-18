@@ -51,10 +51,10 @@ type Run struct {
 	Endpoint   string             `json:"endpoint"`
 	Namespace  string             `json:"namespace"`
 	UID        string
-	Start      int64         `json:"start"`
-	Duration   time.Duration `json:"duration"`
-	Outputs    string        `json:"outputs"`
-	Deployment string        `json:"deployment"`
+	Start      int64   `json:"start"`
+	Duration   float64 `json:"duration"`
+	Outputs    string  `json:"outputs"`
+	Deployment string  `json:"deployment"`
 }
 
 // RunAction is message struct to be sent to the run component
@@ -130,6 +130,14 @@ func GotAction(action RunAction) (float64, []byte, error) {
 		cmdName := "terraform"
 		cmdArgs := []string{"destroy"}
 		cmd := exec.Command(cmdName, cmdArgs...)
+		cmd.Env = os.Environ()
+		for key, val := range action.Secrets {
+			log.Info().Str("run", action.ID).Str("secret", key).Msg("Received some secrets...")
+			if val == "" {
+				log.Error().Str("run", action.ID).Str("secret", key).Msg("secret is empty")
+			}
+			cmd.Env = append(cmd.Env, fmt.Sprintf("TF_VAR_%s=%s", key, val))
+		}
 		cmd.Dir = runPath
 		if cmdOut, tfErr = cmd.Output(); tfErr != nil {
 			log.Error().Str("run", action.ID).Str("out", string(cmdOut)).Msgf("Terraform destroy failed: %s", tfErr)
@@ -139,7 +147,7 @@ func GotAction(action RunAction) (float64, []byte, error) {
 	}
 	tsEnd := time.Now()
 	duration := tsEnd.Sub(tsStart).Seconds()
-	log.Debug().Str("run", action.ID).Float64("duration", duration).Msg("Terraform:done")
+	log.Info().Str("run", action.ID).Float64("duration", duration).Msg("Terraform:done")
 	return duration, outputs, nil
 }
 
@@ -245,6 +253,8 @@ func GetRunAction() error {
 							deployment = valData["value"]
 						}
 					}
+				} else {
+					log.Error().Msgf("Failed to decode json ouputs of terraform %s", outputs)
 				}
 				newrun := bson.M{
 					"$set": bson.M{
@@ -254,7 +264,12 @@ func GetRunAction() error {
 						"deployment": deployment,
 					},
 				}
-				runCollection.FindOneAndUpdate(ctx, run, newrun)
+				updatedRun := Run{}
+				upErr := runCollection.FindOneAndUpdate(ctx, run, newrun).Decode(&updatedRun)
+				if upErr != nil {
+					log.Error().Msgf("Failed to update run %s: %s", action.ID, upErr)
+				}
+				log.Info().Msgf("Updated run  %+v", updatedRun)
 				cancel()
 			}
 			d.Ack(true)
