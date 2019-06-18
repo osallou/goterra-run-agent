@@ -269,7 +269,6 @@ func GetRunAction() error {
 				if upErr != nil {
 					log.Error().Msgf("Failed to update run %s: %s", action.ID, upErr)
 				}
-				log.Info().Msgf("Updated run  %+v", updatedRun)
 				cancel()
 			}
 			d.Ack(true)
