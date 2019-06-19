@@ -42,6 +42,13 @@ var HomeHandler = func(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+// Event represent an action (deploy, destroy, etc.) on a run (historical data)
+type Event struct {
+	TS      int64  `json:"ts"`
+	Action  string `json:"action"`
+	Success bool   `json:"success"`
+}
+
 // Run represents a deployment info for an app
 type Run struct {
 	ID         primitive.ObjectID `json:"id" bson:"_id,omitempty"`
@@ -55,6 +62,7 @@ type Run struct {
 	Duration   float64 `json:"duration"`
 	Outputs    string  `json:"outputs"`
 	Deployment string  `json:"deployment"`
+	Events     []Event `json:"events"`
 }
 
 // RunAction is message struct to be sent to the run component
@@ -128,7 +136,7 @@ func GotAction(action RunAction) (float64, []byte, error) {
 			tfErr  error
 		)
 		cmdName := "terraform"
-		cmdArgs := []string{"destroy"}
+		cmdArgs := []string{"destroy", "-auto-approve"}
 		cmd := exec.Command(cmdName, cmdArgs...)
 		cmd.Env = os.Environ()
 		for key, val := range action.Secrets {
@@ -144,6 +152,28 @@ func GotAction(action RunAction) (float64, []byte, error) {
 			return 0, cmdOut, tfErr
 		}
 		log.Info().Str("run", action.ID).Str("out", string(cmdOut)).Msg("Terraform:destroy")
+		outputs = cmdOut
+	} else if strings.HasPrefix(action.Action, "state") {
+		stateElts := strings.Split(action.Action, ":")
+		runPathElts := []string{config.Deploy.Path, action.ID}
+		runPath := strings.Join(runPathElts, "/")
+		var (
+			cmdOut []byte
+			tfErr  error
+		)
+		cmdName := "terraform"
+		cmdArgs := []string{"state", "list"}
+		if len(stateElts) > 1 {
+			cmdArgs = []string{"state", "show", stateElts[1]}
+		}
+		cmd := exec.Command(cmdName, cmdArgs...)
+		cmd.Dir = runPath
+		if cmdOut, tfErr = cmd.Output(); tfErr != nil {
+			log.Error().Str("run", action.ID).Str("out", string(cmdOut)).Msgf("Terraform state failed: %s", tfErr)
+			return 0, cmdOut, tfErr
+		}
+		log.Info().Str("run", action.ID).Str("out", string(cmdOut)).Msg("Terraform:state")
+		outputs = cmdOut
 	}
 	tsEnd := time.Now()
 	duration := tsEnd.Sub(tsStart).Seconds()
@@ -232,10 +262,12 @@ func GetRunAction() error {
 				continue
 			}
 			duration, outputs, msgErr := GotAction(action)
-			status := "success"
+			actionOK := true
+			status := fmt.Sprintf("%s_success", action.Action)
 			if msgErr != nil {
-				log.Error().Msgf("Error with action: %s", msgErr)
-				status = "failure"
+				log.Error().Str("run", action.ID).Msgf("Error with action: %s", msgErr)
+				status = fmt.Sprintf("%s_failure", action.Action)
+				actionOK = false
 			} else {
 				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				objID, _ := primitive.ObjectIDFromHex(action.ID)
@@ -247,14 +279,14 @@ func GetRunAction() error {
 				outErr := json.Unmarshal(outputs, &outputData)
 				if outErr == nil {
 					if val, ok := outputData["deployment_id"]; ok {
-						var valData map[string]string
+						var valData map[string]interface{}
 						depErr := json.Unmarshal(*val, &valData)
 						if depErr == nil {
-							deployment = valData["value"]
+							deployment = valData["value"].(string)
 						}
 					}
 				} else {
-					log.Error().Msgf("Failed to decode json ouputs of terraform %s", outputs)
+					log.Error().Str("run", action.ID).Msgf("Failed to decode json ouputs of terraform %s", outputs)
 				}
 				newrun := bson.M{
 					"$set": bson.M{
@@ -263,11 +295,18 @@ func GetRunAction() error {
 						"outputs":    string(outputs),
 						"deployment": deployment,
 					},
+					"$push": bson.M{
+						"events": bson.M{
+							"ts":      time.Now().Unix(),
+							"action":  action.Action,
+							"success": actionOK,
+						},
+					},
 				}
 				updatedRun := Run{}
 				upErr := runCollection.FindOneAndUpdate(ctx, run, newrun).Decode(&updatedRun)
 				if upErr != nil {
-					log.Error().Msgf("Failed to update run %s: %s", action.ID, upErr)
+					log.Error().Str("run", action.ID).Msgf("Failed to update run: %s", upErr)
 				}
 				cancel()
 			}
@@ -293,6 +332,120 @@ func CheckToken(authToken string) (user terraUser.User, err error) {
 	}
 	json.Unmarshal(msg, &user)
 	return user, nil
+}
+
+// GetRunStatesHandler gets run terraform states
+var GetRunStatesHandler = func(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	nsID := vars["id"]
+	runID := vars["run"]
+
+	claims, err := CheckToken(r.Header.Get("Authorization"))
+	if err != nil {
+		w.Header().Add("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		respError := map[string]interface{}{"message": fmt.Sprintf("Auth error: %s", err)}
+		json.NewEncoder(w).Encode(respError)
+		return
+	}
+
+	// Get run
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	var rundb Run
+	objID, _ := primitive.ObjectIDFromHex(runID)
+	run := bson.M{
+		"_id":       objID,
+		"namespace": nsID,
+	}
+	err = runCollection.FindOne(ctx, run).Decode(&rundb)
+	if err != nil {
+		w.Header().Add("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		respError := map[string]interface{}{"message": "failed to create run"}
+		json.NewEncoder(w).Encode(respError)
+		return
+	}
+
+	if !claims.Admin && claims.UID != rundb.UID {
+		w.Header().Add("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		respError := map[string]interface{}{"message": fmt.Sprintf("Not allowed to access this resource: %s", err)}
+		json.NewEncoder(w).Encode(respError)
+		return
+	}
+
+	action := RunAction{Action: "state", ID: runID}
+	_, output, err := GotAction(action)
+	if err != nil {
+		w.Header().Add("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		respError := map[string]interface{}{"message": fmt.Sprintf("failed to get state: %s", err)}
+		json.NewEncoder(w).Encode(respError)
+		return
+	}
+	states := strings.Split(string(output), "\n")
+	w.Header().Add("Content-Type", "application/json")
+	resp := map[string]interface{}{"states": states}
+	json.NewEncoder(w).Encode(resp)
+}
+
+// GetRunStateHandler gets run terraform states
+var GetRunStateHandler = func(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	nsID := vars["id"]
+	runID := vars["run"]
+	stateID := vars["state"]
+
+	claims, err := CheckToken(r.Header.Get("Authorization"))
+	if err != nil {
+		w.Header().Add("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		respError := map[string]interface{}{"message": fmt.Sprintf("Auth error: %s", err)}
+		json.NewEncoder(w).Encode(respError)
+		return
+	}
+
+	// Get run
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	var rundb Run
+	objID, _ := primitive.ObjectIDFromHex(runID)
+	run := bson.M{
+		"_id":       objID,
+		"namespace": nsID,
+	}
+	err = runCollection.FindOne(ctx, run).Decode(&rundb)
+	if err != nil {
+		w.Header().Add("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		respError := map[string]interface{}{"message": "failed to create run"}
+		json.NewEncoder(w).Encode(respError)
+		return
+	}
+
+	if !claims.Admin && claims.UID != rundb.UID {
+		w.Header().Add("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		respError := map[string]interface{}{"message": fmt.Sprintf("Not allowed to access this resource: %s", err)}
+		json.NewEncoder(w).Encode(respError)
+		return
+	}
+
+	action := RunAction{Action: fmt.Sprintf("state:%s", stateID), ID: runID}
+	_, output, err := GotAction(action)
+	if err != nil {
+		w.Header().Add("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		respError := map[string]interface{}{"message": fmt.Sprintf("failed to get state: %s", err)}
+		json.NewEncoder(w).Encode(respError)
+		return
+	}
+	w.Header().Add("Content-Type", "application/json")
+	resp := map[string]interface{}{"state": string(output), "id": stateID}
+	json.NewEncoder(w).Encode(resp)
 }
 
 // GetRunStatusHandler returns run info
@@ -388,7 +541,9 @@ func main() {
 	r := mux.NewRouter()
 	r.HandleFunc("/run-agent", HomeHandler).Methods("GET")
 
-	r.HandleFunc("/run-agent/ns/{id}/run/{run}", GetRunStatusHandler).Methods("GET") // deploy app
+	r.HandleFunc("/run-agent/ns/{id}/run/{run}", GetRunStatusHandler).Methods("GET")              // deploy app
+	r.HandleFunc("/run-agent/ns/{id}/run/{run}/state", GetRunStatesHandler).Methods("GET")        // deploy app
+	r.HandleFunc("/run-agent/ns/{id}/run/{run}/state/{state}", GetRunStateHandler).Methods("GET") // deploy app
 
 	handler := cors.Default().Handler(r)
 
