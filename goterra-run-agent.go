@@ -545,7 +545,13 @@ func main() {
 	r.HandleFunc("/run-agent/ns/{id}/run/{run}/state", GetRunStatesHandler).Methods("GET")        // deploy app
 	r.HandleFunc("/run-agent/ns/{id}/run/{run}/state/{state}", GetRunStateHandler).Methods("GET") // deploy app
 
-	handler := cors.Default().Handler(r)
+	c := cors.New(cors.Options{
+		AllowedOrigins:   []string{"*"},
+		AllowCredentials: true,
+		AllowedHeaders:   []string{"Authorization"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE"},
+	})
+	handler := c.Handler(r)
 
 	loggedRouter := handlers.LoggingHandler(os.Stdout, handler)
 
