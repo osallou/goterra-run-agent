@@ -74,6 +74,31 @@ type RunAction struct {
 	Secrets map[string]string `json:"secrets"`
 }
 
+// GotState gets the terraform show -json output
+func GotState(action RunAction) ([]byte, error) {
+	config := terraConfig.LoadConfig()
+	var state = make([]byte, 0)
+
+	runPathElts := []string{config.Deploy.Path, action.ID}
+	runPath := strings.Join(runPathElts, "/")
+	var (
+		cmdStateOut []byte
+		tfStateErr  error
+	)
+
+	cmdName := "terraform"
+	cmdArgs := []string{"show", "-json"}
+	cmd := exec.Command(cmdName, cmdArgs...)
+	cmd.Dir = runPath
+	if cmdStateOut, tfStateErr = cmd.Output(); tfStateErr != nil {
+		log.Error().Str("run", action.ID).Str("show", string(cmdStateOut)).Msgf("Terraform show failed: %s", tfStateErr)
+		return cmdStateOut, tfStateErr
+	}
+	log.Info().Str("run", action.ID).Str("show", string(cmdStateOut)).Msg("Terraform:show")
+	state = cmdStateOut
+	return state, nil
+}
+
 // GotAction manage received message
 func GotAction(action RunAction) (float64, []byte, error) {
 	config := terraConfig.LoadConfig()
@@ -128,6 +153,7 @@ func GotAction(action RunAction) (float64, []byte, error) {
 		}
 		log.Info().Str("run", action.ID).Str("out", string(cmdOut)).Msg("Terraform:output")
 		outputs = cmdOut
+
 	} else if action.Action == "destroy" {
 		runPathElts := []string{config.Deploy.Path, action.ID}
 		runPath := strings.Join(runPathElts, "/")
@@ -288,12 +314,19 @@ func GetRunAction() error {
 				} else {
 					log.Error().Str("run", action.ID).Msgf("Failed to decode json ouputs of terraform %s", outputs)
 				}
+
+				state, stateErr := GotState(action)
+				if stateErr != nil {
+					state = []byte("")
+				}
+
 				newrun := bson.M{
 					"$set": bson.M{
 						"duration":   duration,
 						"status":     status,
 						"outputs":    string(outputs),
 						"deployment": deployment,
+						"state":      string(state),
 					},
 					"$push": bson.M{
 						"events": bson.M{
