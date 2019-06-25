@@ -51,18 +51,20 @@ type Event struct {
 
 // Run represents a deployment info for an app
 type Run struct {
-	ID         primitive.ObjectID `json:"id" bson:"_id,omitempty"`
-	AppID      string             `json:"appID"` // Application id
-	Inputs     map[string]string  `json:"inputs"`
-	Status     string             `json:"status"`
-	Endpoint   string             `json:"endpoint"`
-	Namespace  string             `json:"namespace"`
-	UID        string
-	Start      int64   `json:"start"`
-	Duration   float64 `json:"duration"`
-	Outputs    string  `json:"outputs"`
-	Deployment string  `json:"deployment"`
-	Events     []Event `json:"events"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	ID          primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	AppID       string             `json:"appID"` // Application id
+	Inputs      map[string]string  `json:"inputs"`
+	Status      string             `json:"status"`
+	Endpoint    string             `json:"endpoint"`
+	Namespace   string             `json:"namespace"`
+	UID         string
+	Start       int64   `json:"start"`
+	Duration    float64 `json:"duration"`
+	Outputs     string  `json:"outputs"`
+	Deployment  string  `json:"deployment"`
+	Events      []Event `json:"events"`
 }
 
 // RunAction is message struct to be sent to the run component
