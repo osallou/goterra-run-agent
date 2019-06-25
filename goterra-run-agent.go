@@ -64,6 +64,7 @@ type Run struct {
 	End         int64   `json:"end"`
 	Duration    float64 `json:"duration"`
 	Outputs     string  `json:"outputs"`
+	Error       string  `json:"error"`
 	Deployment  string  `json:"deployment"`
 	Events      []Event `json:"events"`
 }
@@ -293,16 +294,28 @@ func GetRunAction() error {
 			duration, outputs, msgErr := GotAction(action)
 			actionOK := true
 			status := fmt.Sprintf("%s_success", action.Action)
+			var newrun bson.M
 			if msgErr != nil {
 				log.Error().Str("run", action.ID).Msgf("Error with action: %s", msgErr)
 				status = fmt.Sprintf("%s_failure", action.Action)
 				actionOK = false
-			} else {
-				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				objID, _ := primitive.ObjectIDFromHex(action.ID)
-				run := bson.M{
-					"_id": objID,
+
+				newrun = bson.M{
+					"$set": bson.M{
+						"duration": duration,
+						"status":   status,
+						"error":    string(outputs),
+					},
+					"$push": bson.M{
+						"events": bson.M{
+							"ts":      time.Now().Unix(),
+							"action":  action.Action,
+							"success": actionOK,
+						},
+					},
 				}
+
+			} else {
 				var outputData map[string]*json.RawMessage
 				deployment := ""
 				outErr := json.Unmarshal(outputs, &outputData)
@@ -328,11 +341,12 @@ func GetRunAction() error {
 					end = time.Now().Unix()
 				}
 
-				newrun := bson.M{
+				newrun = bson.M{
 					"$set": bson.M{
 						"duration":   duration,
 						"status":     status,
 						"outputs":    string(outputs),
+						"error":      "",
 						"deployment": deployment,
 						"state":      string(state),
 						"end":        end,
@@ -345,14 +359,21 @@ func GetRunAction() error {
 						},
 					},
 				}
-
-				updatedRun := Run{}
-				upErr := runCollection.FindOneAndUpdate(ctx, run, newrun).Decode(&updatedRun)
-				if upErr != nil {
-					log.Error().Str("run", action.ID).Msgf("Failed to update run: %s", upErr)
-				}
-				cancel()
 			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			objID, _ := primitive.ObjectIDFromHex(action.ID)
+			run := bson.M{
+				"_id": objID,
+			}
+
+			updatedRun := Run{}
+			upErr := runCollection.FindOneAndUpdate(ctx, run, newrun).Decode(&updatedRun)
+			if upErr != nil {
+				log.Error().Str("run", action.ID).Msgf("Failed to update run: %s", upErr)
+			}
+			cancel()
+
 			d.Ack(true)
 		}
 	}()
