@@ -61,6 +61,7 @@ type Run struct {
 	Namespace   string             `json:"namespace"`
 	UID         string
 	Start       int64   `json:"start"`
+	End         int64   `json:"end"`
 	Duration    float64 `json:"duration"`
 	Outputs     string  `json:"outputs"`
 	Deployment  string  `json:"deployment"`
@@ -322,6 +323,11 @@ func GetRunAction() error {
 					state = []byte("")
 				}
 
+				var end int64
+				if action.Action == "destroy" && actionOK {
+					end = time.Now().Unix()
+				}
+
 				newrun := bson.M{
 					"$set": bson.M{
 						"duration":   duration,
@@ -329,6 +335,7 @@ func GetRunAction() error {
 						"outputs":    string(outputs),
 						"deployment": deployment,
 						"state":      string(state),
+						"end":        end,
 					},
 					"$push": bson.M{
 						"events": bson.M{
@@ -338,6 +345,7 @@ func GetRunAction() error {
 						},
 					},
 				}
+
 				updatedRun := Run{}
 				upErr := runCollection.FindOneAndUpdate(ctx, run, newrun).Decode(&updatedRun)
 				if upErr != nil {
