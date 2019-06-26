@@ -110,6 +110,7 @@ func GotAction(action RunAction) (float64, []byte, error) {
 	var outputs = make([]byte, 0)
 
 	if action.Action == "deploy" {
+		log.Info().Str("run", action.ID).Msg("Terraform:request:deploy")
 		runPathElts := []string{config.Deploy.Path, action.ID}
 		runPath := strings.Join(runPathElts, "/")
 		var (
@@ -159,6 +160,7 @@ func GotAction(action RunAction) (float64, []byte, error) {
 		outputs = cmdOut
 
 	} else if action.Action == "destroy" {
+		log.Info().Str("run", action.ID).Msg("Terraform:request:destroy")
 		runPathElts := []string{config.Deploy.Path, action.ID}
 		runPath := strings.Join(runPathElts, "/")
 		var (
@@ -316,19 +318,26 @@ func GetRunAction() error {
 				}
 
 			} else {
-				var outputData map[string]*json.RawMessage
 				deployment := ""
-				outErr := json.Unmarshal(outputs, &outputData)
-				if outErr == nil {
-					if val, ok := outputData["deployment_id"]; ok {
-						var valData map[string]interface{}
-						depErr := json.Unmarshal(*val, &valData)
-						if depErr == nil {
-							deployment = valData["value"].(string)
-						}
-					}
+				errorMsg := ""
+				if action.Action == "destroy" {
+					// Text only message
+					errorMsg = string(outputs)
+					outputs = []byte("")
 				} else {
-					log.Error().Str("run", action.ID).Msgf("Failed to decode json ouputs of terraform %s", outputs)
+					var outputData map[string]*json.RawMessage
+					outErr := json.Unmarshal(outputs, &outputData)
+					if outErr == nil {
+						if val, ok := outputData["deployment_id"]; ok {
+							var valData map[string]interface{}
+							depErr := json.Unmarshal(*val, &valData)
+							if depErr == nil {
+								deployment = valData["value"].(string)
+							}
+						}
+					} else {
+						log.Error().Str("run", action.ID).Msgf("Failed to decode json ouputs of terraform %s", outputs)
+					}
 				}
 
 				state, stateErr := GotState(action)
@@ -346,7 +355,7 @@ func GetRunAction() error {
 						"duration":   duration,
 						"status":     status,
 						"outputs":    string(outputs),
-						"error":      "",
+						"error":      errorMsg,
 						"deployment": deployment,
 						"state":      string(state),
 						"end":        end,
