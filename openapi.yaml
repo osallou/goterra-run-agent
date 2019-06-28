@@ -1,0 +1,174 @@
+openapi: "3.0.0"
+info:
+  title: GoTerra run agent
+  description: GoTerra Run agent API
+  version: 0.0.1
+  
+servers:
+  - url: https://goterra.genouest.org
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    JWTToken:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    States:
+      type: object
+      properties:
+        states:
+          description: list of states in key=value format
+          type: array
+          items:
+            type: string
+    State:
+      type: object
+      properties:
+        state:
+          type: string
+          description: value of state element
+        id:
+          type: string
+          description: requested state
+    Run:
+      type: object
+      properties:
+        endpoint:
+          type: string
+        namespace:
+          type: string
+        status:
+          type: string
+        appID:
+          type: string
+        inputs:
+          description: "inputs expected by app/endpoint for deployment"
+          type: object
+          additionalProperties:
+            type: string
+        secretinputs:
+          description: "inputs expected by app/endpoint for deployment, those data are not stored in database nor files and only used at deployment time"
+          type: object
+          additionalProperties:
+            type: string
+
+paths:                   
+  /run-agent:
+    get:
+      summary: base entry point to check service
+      description: check that service is live
+      responses:
+        '200':
+          description: service is up
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    type: string
+                  message:
+                    type: string
+  /run-agent/ns/{id}/run/{run}:
+    get:
+      security:
+       - JWTToken: []
+       - ApiKeyAuth: []
+      summary: get a deployment data
+      description: get key and related values stored by apps
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: run
+          description: run identifier
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: deployment deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Run'
+        '500':
+          description: internal error
+        '401':
+          description: invalid token
+
+  /run-agent/ns/{id}/run/{run}/state:
+    get:
+      security:
+       - JWTToken: []
+       - ApiKeyAuth: []
+      summary: get a deployment data
+      description: get key and related values stored by apps
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: run
+          description: run identifier
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: list of state elements
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/States'
+        '500':
+          description: internal error
+        '401':
+          description: invalid token
+
+  /run-agent/ns/{id}/run/{run}/state/{state}:
+    get:
+      security:
+       - JWTToken: []
+       - ApiKeyAuth: []
+      summary: get a deployment data
+      description: get key and related values stored by apps
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: run
+          description: run identifier
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: state
+          description: state identifier
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: deployment deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/State'
+        '500':
+          description: internal error
+        '401':
+          description: invalid token
