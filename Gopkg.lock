@@ -115,7 +115,7 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:045f928f045963c1a645bc87521ccd7fb1931647ab641f5e08213dbbb377f9d3"
+  digest = "1:1e7d9a91012796a05e4599ff1bf1c7f654cd1ebb621acc3009a88d636629edea"
   name = "github.com/osallou/goterra-lib"
   packages = [
     "lib/config",
@@ -124,7 +124,7 @@
     "lib/user",
   ]
   pruneopts = "UT"
-  revision = "4e154f9269296ca384c77ab07b3f803c57e1fd32"
+  revision = "63ed4917f9e490b0cc601ca7fc07ba5bd7962f32"
 
 [[projects]]
   digest = "1:b0c25f00bad20d783d259af2af8666969e2fc343fa0dc9efe52936bbd67fb758"
@@ -216,7 +216,7 @@
   name = "golang.org/x/crypto"
   packages = ["pbkdf2"]
   pruneopts = "UT"
-  revision = "cc06ce4a13d484c0101a9e92913248488a75786d"
+  revision = "4def268fd1a49955bfb3dda92fe3db4f924f2285"
 
 [[projects]]
   branch = "master"
