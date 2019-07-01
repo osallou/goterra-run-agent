@@ -25,6 +25,8 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+
+	terraModel "github.com/osallou/goterra-lib/lib/model"
 )
 
 // Version of server
@@ -42,6 +44,7 @@ var HomeHandler = func(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+/*
 // Event represent an action (deploy, destroy, etc.) on a run (historical data)
 type Event struct {
 	TS      int64  `json:"ts"`
@@ -69,6 +72,7 @@ type Run struct {
 	Events      []Event `json:"events"`
 }
 
+
 // RunAction is message struct to be sent to the run component
 // action: apply or destroy
 // id: identifier of the run
@@ -78,8 +82,10 @@ type RunAction struct {
 	Secrets map[string]string `json:"secrets"`
 }
 
+*/
+
 // GotState gets the terraform show -json output
-func GotState(action RunAction) ([]byte, error) {
+func GotState(action terraModel.RunAction) ([]byte, error) {
 	config := terraConfig.LoadConfig()
 	var state = make([]byte, 0)
 
@@ -104,7 +110,7 @@ func GotState(action RunAction) ([]byte, error) {
 }
 
 // GotAction manage received message
-func GotAction(action RunAction) (float64, []byte, error) {
+func GotAction(action terraModel.RunAction) (float64, []byte, error) {
 	config := terraConfig.LoadConfig()
 	tsStart := time.Now()
 	var outputs = make([]byte, 0)
@@ -286,7 +292,7 @@ func GetRunAction() error {
 		log.Debug().Msgf("listen for messages on %s", queue.Name)
 		for d := range msgs {
 			log.Debug().Msg("got a message")
-			action := RunAction{}
+			action := terraModel.RunAction{}
 			err := json.Unmarshal(d.Body, &action)
 			if err != nil {
 				log.Error().Msgf("failed to decode message %s", d.Body)
@@ -376,7 +382,7 @@ func GetRunAction() error {
 				"_id": objID,
 			}
 
-			updatedRun := Run{}
+			updatedRun := terraModel.Run{}
 			upErr := runCollection.FindOneAndUpdate(ctx, run, newrun).Decode(&updatedRun)
 			if upErr != nil {
 				log.Error().Str("run", action.ID).Msgf("Failed to update run: %s", upErr)
@@ -426,7 +432,7 @@ var GetRunStatesHandler = func(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	var rundb Run
+	var rundb terraModel.Run
 	objID, _ := primitive.ObjectIDFromHex(runID)
 	run := bson.M{
 		"_id":       objID,
@@ -449,7 +455,7 @@ var GetRunStatesHandler = func(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	action := RunAction{Action: "state", ID: runID}
+	action := terraModel.RunAction{Action: "state", ID: runID}
 	_, output, err := GotAction(action)
 	if err != nil {
 		w.Header().Add("Content-Type", "application/json")
@@ -484,7 +490,7 @@ var GetRunStateHandler = func(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	var rundb Run
+	var rundb terraModel.Run
 	objID, _ := primitive.ObjectIDFromHex(runID)
 	run := bson.M{
 		"_id":       objID,
@@ -507,7 +513,7 @@ var GetRunStateHandler = func(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	action := RunAction{Action: fmt.Sprintf("state:%s", stateID), ID: runID}
+	action := terraModel.RunAction{Action: fmt.Sprintf("state:%s", stateID), ID: runID}
 	_, output, err := GotAction(action)
 	if err != nil {
 		w.Header().Add("Content-Type", "application/json")
@@ -540,7 +546,7 @@ var GetRunStatusHandler = func(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	var rundb Run
+	var rundb terraModel.Run
 	objID, _ := primitive.ObjectIDFromHex(runID)
 	run := bson.M{
 		"_id":       objID,
