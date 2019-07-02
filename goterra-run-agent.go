@@ -32,10 +32,13 @@ import (
 // Version of server
 var Version string
 
+const DEPLOY string = "deploy"
+const DESTROY string = "destroy"
+
 var mongoClient mongo.Client
 var nsCollection *mongo.Collection
 var runCollection *mongo.Collection
-var runOutputsCollection *mongo.Collection
+var runStateCollection *mongo.Collection
 
 // HomeHandler manages base entrypoint
 var HomeHandler = func(w http.ResponseWriter, r *http.Request) {
@@ -115,7 +118,7 @@ func GotAction(action terraModel.RunAction) (float64, []byte, error) {
 	tsStart := time.Now()
 	var outputs = make([]byte, 0)
 
-	if action.Action == "deploy" {
+	if action.Action == DEPLOY {
 		log.Info().Str("run", action.ID).Msg("Terraform:request:deploy")
 		runPathElts := []string{config.Deploy.Path, action.ID}
 		runPath := strings.Join(runPathElts, "/")
@@ -165,7 +168,7 @@ func GotAction(action terraModel.RunAction) (float64, []byte, error) {
 		log.Info().Str("run", action.ID).Str("out", string(cmdOut)).Msg("Terraform:output")
 		outputs = cmdOut
 
-	} else if action.Action == "destroy" {
+	} else if action.Action == DESTROY {
 		log.Info().Str("run", action.ID).Msg("Terraform:request:destroy")
 		runPathElts := []string{config.Deploy.Path, action.ID}
 		runPath := strings.Join(runPathElts, "/")
@@ -238,6 +241,24 @@ func setStatus(id string, status string) error {
 		log.Error().Str("run", id).Msgf("Failed to update run: %s", upErr)
 		return upErr
 	}
+	return nil
+}
+
+func setState(id string, state []byte) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	run := bson.M{
+		"run":   id,
+		"state": string(state),
+		"ts":    time.Now().Unix(),
+	}
+
+	newRunState, upErr := runStateCollection.InsertOne(ctx, run)
+	if upErr != nil {
+		log.Error().Str("run", id).Msgf("Failed to insert run state: %s", upErr)
+		return upErr
+	}
+	log.Debug().Str("RunState", newRunState.InsertedID.(primitive.ObjectID).Hex()).Msg("New run state inserted")
 	return nil
 }
 
@@ -352,7 +373,7 @@ func GetRunAction() error {
 			} else {
 				deployment := ""
 				errorMsg := ""
-				if action.Action == "destroy" {
+				if action.Action == DESTROY {
 					// Text only message
 					errorMsg = string(outputs)
 					outputs = []byte("")
@@ -372,13 +393,18 @@ func GetRunAction() error {
 					}
 				}
 
-				state, stateErr := GotState(action)
-				if stateErr != nil {
-					state = []byte("")
+				state := []byte("")
+				var stateErr error
+				if action.Action == DEPLOY && actionOK {
+					state, stateErr = GotState(action)
+					if stateErr != nil {
+						state = []byte("")
+					}
+					setState(action.ID, state)
 				}
 
 				var end int64
-				if action.Action == "destroy" && actionOK {
+				if action.Action == DESTROY && actionOK {
 					end = time.Now().Unix()
 				}
 
@@ -389,7 +415,6 @@ func GetRunAction() error {
 						"outputs":    string(outputs),
 						"error":      errorMsg,
 						"deployment": deployment,
-						"state":      string(state),
 						"end":        end,
 					},
 					"$push": bson.M{
@@ -634,7 +659,7 @@ func main() {
 	}
 	nsCollection = mongoClient.Database(config.Mongo.DB).Collection("ns")
 	runCollection = mongoClient.Database(config.Mongo.DB).Collection("run")
-	runOutputsCollection = mongoClient.Database(config.Mongo.DB).Collection("runoutputs")
+	runStateCollection = mongoClient.Database(config.Mongo.DB).Collection("runstate")
 
 	go GetRunAction()
 	/*
