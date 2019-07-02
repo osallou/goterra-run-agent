@@ -219,6 +219,28 @@ func GotAction(action terraModel.RunAction) (float64, []byte, error) {
 	return duration, outputs, nil
 }
 
+func setStatus(id string, status string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	objID, _ := primitive.ObjectIDFromHex(id)
+	run := bson.M{
+		"_id": objID,
+	}
+	newrun := bson.M{
+		"$set": bson.M{
+			"status": status,
+		},
+	}
+
+	updatedRun := terraModel.Run{}
+	upErr := runCollection.FindOneAndUpdate(ctx, run, newrun).Decode(&updatedRun)
+	if upErr != nil {
+		log.Error().Str("run", id).Msgf("Failed to update run: %s", upErr)
+		return upErr
+	}
+	return nil
+}
+
 // GetRunAction gets a message from rabbitmq exchange
 func GetRunAction() error {
 	config := terraConfig.LoadConfig()
@@ -299,9 +321,13 @@ func GetRunAction() error {
 				d.Ack(true)
 				continue
 			}
+			tmpStatus := fmt.Sprintf("%s_in_progress", action.Action)
+			setStatus(action.ID, tmpStatus)
+
 			duration, outputs, msgErr := GotAction(action)
 			actionOK := true
 			status := fmt.Sprintf("%s_success", action.Action)
+
 			var newrun bson.M
 			if msgErr != nil {
 				log.Error().Str("run", action.ID).Msgf("Error with action: %s", msgErr)
