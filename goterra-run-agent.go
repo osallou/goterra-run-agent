@@ -32,7 +32,10 @@ import (
 // Version of server
 var Version string
 
+// DEPLOY is to start a new deployment
 const DEPLOY string = "deploy"
+
+// DESTROY is to destroy/delete a deployment
 const DESTROY string = "destroy"
 
 var mongoClient mongo.Client
