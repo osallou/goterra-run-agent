@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -50,45 +51,20 @@ var HomeHandler = func(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
-/*
-// Event represent an action (deploy, destroy, etc.) on a run (historical data)
-type Event struct {
-	TS      int64  `json:"ts"`
-	Action  string `json:"action"`
-	Success bool   `json:"success"`
+// removeContents delete all files and dirs in *dir*
+func removeContents(dir string) error {
+	files, err := filepath.Glob(filepath.Join(dir, "*"))
+	if err != nil {
+		return err
+	}
+	for _, file := range files {
+		err = os.RemoveAll(file)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
-
-// Run represents a deployment info for an app
-type Run struct {
-	Name        string             `json:"name"`
-	Description string             `json:"description"`
-	ID          primitive.ObjectID `json:"id" bson:"_id,omitempty"`
-	AppID       string             `json:"appID"` // Application id
-	Inputs      map[string]string  `json:"inputs"`
-	Status      string             `json:"status"`
-	Endpoint    string             `json:"endpoint"`
-	Namespace   string             `json:"namespace"`
-	UID         string
-	Start       int64   `json:"start"`
-	End         int64   `json:"end"`
-	Duration    float64 `json:"duration"`
-	Outputs     string  `json:"outputs"`
-	Error       string  `json:"error"`
-	Deployment  string  `json:"deployment"`
-	Events      []Event `json:"events"`
-}
-
-
-// RunAction is message struct to be sent to the run component
-// action: apply or destroy
-// id: identifier of the run
-type RunAction struct {
-	Action  string            `json:"action"`
-	ID      string            `json:"id"`
-	Secrets map[string]string `json:"secrets"`
-}
-
-*/
 
 // GotState gets the terraform show -json output
 func GotState(action terraModel.RunAction) ([]byte, error) {
@@ -194,6 +170,10 @@ func GotAction(action terraModel.RunAction) (float64, []byte, error) {
 		if cmdOut, tfErr = cmd.Output(); tfErr != nil {
 			log.Error().Str("run", action.ID).Str("out", string(cmdOut)).Msgf("Terraform destroy failed: %s", tfErr)
 			return 0, cmdOut, tfErr
+		}
+		deleteErr := removeContents(runPath)
+		if deleteErr != nil {
+			log.Error().Str("run", action.ID).Str("path", runPath).Msg("Terraform:destroy:failed to delete job directory")
 		}
 		log.Info().Str("run", action.ID).Str("out", string(cmdOut)).Msg("Terraform:destroy")
 		outputs = cmdOut
