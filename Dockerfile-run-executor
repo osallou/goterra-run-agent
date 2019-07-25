@@ -1,0 +1,19 @@
+FROM golang:1.11
+
+LABEL maintainer="Olivier Sallou <olivier.sallou@irisa.fr>"
+
+RUN apt-get update && apt-get install -y wget unzip 
+
+WORKDIR /root
+RUN wget https://releases.hashicorp.com/terraform/0.12.2/terraform_0.12.2_linux_amd64.zip
+RUN unzip terraform_0.12.2_linux_amd64.zip
+RUN VERSION=`curl --silent "https://api.github.com/repos/osallou/terraform-provider-goterra/releases/latest" | grep '"tag_name":'| sed -E 's/.*"([^"]+)".*/\1/'` && curl -L -o terraform-provider-goterra https://github.com/osallou/terraform-provider-goterra/releases/download/$VERSION/terraform-provider-goterra.linux.amd64 && chmod +x terraform-provider-goterra
+
+
+FROM alpine:latest  
+RUN apk --no-cache add ca-certificates
+WORKDIR /root
+RUN mkdir -p /root/.terraform.d/plugins
+COPY --from=0 /root/terraform /usr/bin/
+COPY --from=0 /root/terraform-provider-goterra /root/.terraform.d/plugins/ 
+RUN mkdir /lib64 && ln -s /lib/libc.musl-x86_64.so.1 /lib64/ld-linux-x86-64.so.2

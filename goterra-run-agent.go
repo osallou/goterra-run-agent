@@ -91,6 +91,59 @@ func GotState(action terraModel.RunAction) ([]byte, error) {
 	return state, nil
 }
 
+func getCommand(cmdName string, cmdArgs []string, cmdSecrets map[string]string, runID string) (*exec.Cmd, error) {
+
+	config := terraConfig.LoadConfig()
+	runPathElts := []string{config.Deploy.Path, runID}
+	runPath := strings.Join(runPathElts, "/")
+
+	if os.Getenv("GOT_DOCKER_USE") != "1" {
+		cmd := exec.Command(cmdName, cmdArgs...)
+		cmd.Env = os.Environ()
+		if cmdSecrets != nil {
+			for key, val := range cmdSecrets {
+				log.Info().Str("secret", key).Msg("Received some secrets...")
+				if val == "" {
+					log.Error().Str("secret", key).Msg("secret is empty")
+				}
+				cmd.Env = append(cmd.Env, fmt.Sprintf("TF_VAR_%s=%s", key, val))
+			}
+		}
+		cmd.Dir = runPath
+		return cmd, nil
+	}
+	if os.Getenv("GOT_DOCKER_DIR") == "" {
+		return nil, fmt.Errorf("Missing env var GOT_DOCKER_DIR")
+	}
+
+	localPathElts := []string{os.Getenv("GOT_DOCKER_DIR"), runID}
+	mountPath := strings.Join(localPathElts, "/")
+
+	if os.Getenv("GOT_DOCKER_IMAGE") == "" {
+		return nil, fmt.Errorf("Missing env var GOT_DOCKER_IMAGE")
+	}
+
+	newName := "docker"
+	newArgs := []string{"run", "--rm", "-w", runPath, "-v", fmt.Sprintf("%s:%s", mountPath, runPath)}
+	newEnv := os.Environ()
+	if cmdSecrets != nil {
+		for key, val := range cmdSecrets {
+			newArgs = append(newArgs, "-e")
+			newArgs = append(newArgs, fmt.Sprintf("TF_VAR_%s=%s", key, val))
+			// newEnv = append(newEnv, fmt.Sprintf("TF_VAR_%s=%q", key, val))
+		}
+	}
+	newArgs = append(newArgs, os.Getenv("GOT_DOCKER_IMAGE"))
+	newArgs = append(newArgs, cmdName)
+	newArgs = append(newArgs, cmdArgs...)
+
+	// log.Debug().Msgf("Command:execute:%s %s", newName, strings.Join(newArgs, " "))
+	cmd := exec.Command(newName, newArgs...)
+	cmd.Env = newEnv
+	// cmd.Dir = runPath
+	return cmd, nil
+}
+
 // GotAction manage received message
 func GotAction(action terraModel.RunAction) (float64, []byte, error) {
 	config := terraConfig.LoadConfig()
@@ -99,16 +152,23 @@ func GotAction(action terraModel.RunAction) (float64, []byte, error) {
 
 	if action.Action == DEPLOY {
 		log.Info().Str("run", action.ID).Msg("Terraform:request:deploy")
-		runPathElts := []string{config.Deploy.Path, action.ID}
-		runPath := strings.Join(runPathElts, "/")
+		// runPathElts := []string{config.Deploy.Path, action.ID}
+		// runPath := strings.Join(runPathElts, "/")
 		var (
 			cmdOut []byte
 			tfErr  error
 		)
 		cmdName := "terraform"
 		cmdArgs := []string{"init"}
-		cmd := exec.Command(cmdName, cmdArgs...)
-		cmd.Dir = runPath
+
+		cmd, cmdErr := getCommand(cmdName, cmdArgs, action.Secrets, action.ID)
+		if cmdErr != nil {
+			log.Error().Str("run", action.ID).Msgf("Terraform cmd generation failed: %s", cmdErr)
+			return 0, []byte("Error"), cmdErr
+		}
+
+		//cmd := exec.Command(cmdName, cmdArgs...)
+		//cmd.Dir = runPath
 		if cmdOut, tfErr = cmd.Output(); tfErr != nil {
 			log.Error().Str("run", action.ID).Str("out", string(cmdOut)).Msgf("Terraform init failed: %s", tfErr)
 			return 0, cmdOut, tfErr
@@ -119,16 +179,25 @@ func GotAction(action terraModel.RunAction) (float64, []byte, error) {
 		cmdArgs = []string{"apply", "-auto-approve", "-input=false"}
 		// Add sensitive data via env vars when executing command
 
-		cmd = exec.Command(cmdName, cmdArgs...)
-		cmd.Env = os.Environ()
-		for key, val := range action.Secrets {
-			log.Info().Str("secret", key).Msg("Received some secrets...")
-			if val == "" {
-				log.Error().Str("secret", key).Msg("secret is empty")
+		/*
+			cmd = exec.Command(cmdName, cmdArgs...)
+			cmd.Env = os.Environ()
+			for key, val := range action.Secrets {
+				log.Info().Str("secret", key).Msg("Received some secrets...")
+				if val == "" {
+					log.Error().Str("secret", key).Msg("secret is empty")
+				}
+				cmd.Env = append(cmd.Env, fmt.Sprintf("TF_VAR_%s=%s", key, val))
 			}
-			cmd.Env = append(cmd.Env, fmt.Sprintf("TF_VAR_%s=%s", key, val))
+			cmd.Dir = runPath
+		*/
+
+		cmd, cmdErr = getCommand(cmdName, cmdArgs, action.Secrets, action.ID)
+		if cmdErr != nil {
+			log.Error().Str("run", action.ID).Msgf("Terraform cmd generation failed: %s", cmdErr)
+			return 0, []byte("Error"), cmdErr
 		}
-		cmd.Dir = runPath
+
 		cmdOut, tfErrExec := cmd.CombinedOutput()
 		if tfErrExec != nil {
 			log.Error().Str("run", action.ID).Str("out", string(cmdOut)).Msgf("Terraform apply failed: %s", tfErrExec)
@@ -138,8 +207,17 @@ func GotAction(action terraModel.RunAction) (float64, []byte, error) {
 
 		cmdName = "terraform"
 		cmdArgs = []string{"output", "-json"}
-		cmd = exec.Command(cmdName, cmdArgs...)
-		cmd.Dir = runPath
+		/*
+			cmd = exec.Command(cmdName, cmdArgs...)
+			cmd.Dir = runPath
+		*/
+
+		cmd, cmdErr = getCommand(cmdName, cmdArgs, action.Secrets, action.ID)
+		if cmdErr != nil {
+			log.Error().Str("run", action.ID).Msgf("Terraform cmd generation failed: %s", cmdErr)
+			return 0, []byte("Error"), cmdErr
+		}
+
 		if cmdOut, tfErr = cmd.Output(); tfErr != nil {
 			log.Error().Str("run", action.ID).Str("out", string(cmdOut)).Msgf("Terraform output failed: %s", tfErr)
 			return 0, cmdOut, tfErr
@@ -157,16 +235,25 @@ func GotAction(action terraModel.RunAction) (float64, []byte, error) {
 		)
 		cmdName := "terraform"
 		cmdArgs := []string{"destroy", "-auto-approve"}
-		cmd := exec.Command(cmdName, cmdArgs...)
-		cmd.Env = os.Environ()
-		for key, val := range action.Secrets {
-			log.Info().Str("run", action.ID).Str("secret", key).Msg("Received some secrets...")
-			if val == "" {
-				log.Error().Str("run", action.ID).Str("secret", key).Msg("secret is empty")
+		/*
+			cmd := exec.Command(cmdName, cmdArgs...)
+			cmd.Env = os.Environ()
+			for key, val := range action.Secrets {
+				log.Info().Str("run", action.ID).Str("secret", key).Msg("Received some secrets...")
+				if val == "" {
+					log.Error().Str("run", action.ID).Str("secret", key).Msg("secret is empty")
+				}
+				cmd.Env = append(cmd.Env, fmt.Sprintf("TF_VAR_%s=%s", key, val))
 			}
-			cmd.Env = append(cmd.Env, fmt.Sprintf("TF_VAR_%s=%s", key, val))
+			cmd.Dir = runPath
+		*/
+
+		cmd, cmdErr := getCommand(cmdName, cmdArgs, action.Secrets, action.ID)
+		if cmdErr != nil {
+			log.Error().Str("run", action.ID).Msgf("Terraform cmd generation failed: %s", cmdErr)
+			return 0, []byte("Error"), cmdErr
 		}
-		cmd.Dir = runPath
+
 		if cmdOut, tfErr = cmd.Output(); tfErr != nil {
 			log.Error().Str("run", action.ID).Str("out", string(cmdOut)).Msgf("Terraform destroy failed: %s", tfErr)
 			return 0, cmdOut, tfErr
@@ -179,8 +266,8 @@ func GotAction(action terraModel.RunAction) (float64, []byte, error) {
 		outputs = cmdOut
 	} else if strings.HasPrefix(action.Action, "state") {
 		stateElts := strings.Split(action.Action, ":")
-		runPathElts := []string{config.Deploy.Path, action.ID}
-		runPath := strings.Join(runPathElts, "/")
+		// runPathElts := []string{config.Deploy.Path, action.ID}
+		// runPath := strings.Join(runPathElts, "/")
 		var (
 			cmdOut []byte
 			tfErr  error
@@ -190,8 +277,18 @@ func GotAction(action terraModel.RunAction) (float64, []byte, error) {
 		if len(stateElts) > 1 {
 			cmdArgs = []string{"state", "show", stateElts[1]}
 		}
-		cmd := exec.Command(cmdName, cmdArgs...)
-		cmd.Dir = runPath
+
+		/*
+			cmd := exec.Command(cmdName, cmdArgs...)
+			cmd.Dir = runPath
+		*/
+
+		cmd, cmdErr := getCommand(cmdName, cmdArgs, action.Secrets, action.ID)
+		if cmdErr != nil {
+			log.Error().Str("run", action.ID).Msgf("Terraform cmd generation failed: %s", cmdErr)
+			return 0, []byte("Error"), cmdErr
+		}
+
 		if cmdOut, tfErr = cmd.Output(); tfErr != nil {
 			log.Error().Str("run", action.ID).Str("out", string(cmdOut)).Msgf("Terraform state failed: %s", tfErr)
 			return 0, cmdOut, tfErr
