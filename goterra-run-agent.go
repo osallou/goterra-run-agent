@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gorilla/handlers"
@@ -404,10 +406,21 @@ func GetRunAction() error {
 		false,      // no-wait
 		nil,        // args
 	)
+
 	if consumeErr != nil {
 		log.Error().Msg("failed to get messages")
 		return consumeErr
 	}
+
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGTERM)
+	go func(connection *amqp.Connection, channel *amqp.Channel) {
+		sig := <-sigs
+		channel.Close()
+		connection.Close()
+		log.Warn().Msgf("Closing AMQP channel and connection after signal %s", sig.String())
+		log.Warn().Msg("Ready for shutdown")
+	}(conn, ch)
 
 	forever := make(chan bool)
 
